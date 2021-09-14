@@ -1,6 +1,10 @@
 package deploycontroller
 
 import (
+	"archive/zip"
+	"crypto/rand"
+	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -8,7 +12,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -100,6 +106,8 @@ import (
 // 	}
 // }
 func DeployFiles(c *gin.Context) {
+	var backupList []string
+	var destination string
 	contentType, params, parseErr := mime.ParseMediaType(c.Request.Header.Get("Content-Type"))
 	if parseErr != nil || !strings.HasPrefix(contentType, "multipart/") {
 
@@ -137,30 +145,78 @@ func DeployFiles(c *gin.Context) {
 		switch part.Header.Get("Content-ID") {
 		case "metadata":
 			log.Print(string(fileBytes))
+			destination = string(fileBytes)
+			log.Print(destination)
 
 		case "media":
 			log.Printf("filesize = %d", len(fileBytes))
 			log.Println(part.Header.Get("Content-Filepath"))
+			isAlreadyThere, _ := isExists(part.Header.Get("Content-Filepath"))
+			println(isAlreadyThere)
+			if isAlreadyThere {
+				backupList = append(backupList, filepath.ToSlash(part.Header.Get("Content-Filepath")))
+			}
 			f, _ := os.Create(part.Header.Get("Content-Filepath"))
 			f.Write(fileBytes)
 			f.Close()
 		}
 	}
+	fmt.Println(backupList)
+	TakeBackup(backupList, destination)
+}
+func TakeBackup(backupList []string, destination string) {
+
+	currentTime := time.Now().Format("01-02-2006")
+	RandomCrypto, _ := rand.Prime(rand.Reader, 128)
+	err := os.MkdirAll("../BACKUP/"+currentTime+"/"+destination+"/", 0755)
+	// Get a Buffer to Write To
+	if err != nil {
+		fmt.Println(err)
+	}
+	file, err := os.Create("../BACKUP/" + currentTime + "/" + destination + "/" + RandomCrypto.String() + "_backup.zip")
+	if err != nil {
+		log.Println("Failed to open zip for writing: %s", err)
+	}
+	defer file.Close()
+	zipw := zip.NewWriter(file)
+	defer zipw.Close()
+	for _, filename := range backupList {
+		if err := appendFiles(filename, zipw); err != nil {
+			log.Println("Failed to add file %s to zip: %s", filename, err)
+		}
+	}
+}
+func appendFiles(filename string, zipw *zip.Writer) error {
+	fmt.Println(filename)
+	file, err := os.Open(filename)
+	// dat, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("Failed to open %s: %s", filename, err)
+	}
+
+	wr, err := zipw.Create(filepath.Base(filename))
+	if err != nil {
+		msg := "Failed to create entry for %s in zip file: %s"
+		return fmt.Errorf(msg, filename, err)
+	}
+
+	if _, err := io.Copy(wr, file); err != nil {
+		return fmt.Errorf("Failed to write %s to zip: %s", filename, err)
+	}
+
+	return nil
+}
+func isExists(name string) (bool, error) {
+	_, err := os.Stat(name)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
-// func isExists(name string) (bool, error) {
-// 	_, err := os.Stat("../PRODUCTION/" + name)
-// 	if err == nil {
-// 		return true, nil
-// 	}
-// 	if errors.Is(err, os.ErrNotExist) {
-// 		return false, nil
-// 	}
-// 	return false, err
-// }
-// func takeBackup(filename string) {
-// 	ZipWriter(filename)
-// }
 // func addFiles(w *zip.Writer, basePath, baseInZip string) {
 // 	// Open the Directory
 // 	files, err := ioutil.ReadDir(basePath)
@@ -197,33 +253,43 @@ func DeployFiles(c *gin.Context) {
 // 	}
 // }
 // func ZipWriter(filename string) {
-// 	baseFolder := "../PRODUCTION/"
-// 	output := "../BACKUP/bamu"
-
-// 	err := os.MkdirAll(output, 0755)
+// 	err := os.MkdirAll(filename, 0755)
+// 	name := filepath.Base(filename)
 // 	// Get a Buffer to Write To
 // 	if err != nil {
 // 		fmt.Println(err)
 // 	}
-// 	outFile, err := os.Create("../BACKUP/" + filename + ".zip")
+// 	srcFile, err := os.Open("../SOURCE/" + filename)
+// 	fmt.Println(srcFile)
+// 	if err != nil {
+// 		fmt.Println(err)
+// 	}
+// 	outFile, err := os.Create("../BACKUP/" + name)
+// 	fmt.Println(outFile)
+
+// 	if err != nil {
+// 		fmt.Println(err)
+// 	}
+// 	files, err := io.Copy(outFile, srcFile)
+// 	fmt.Println(files)
 // 	if err != nil {
 // 		fmt.Println(err)
 // 	}
 // 	defer outFile.Close()
 
 // 	// Create a new zip archive.
-// 	w := zip.NewWriter(outFile)
+// 	// w := zip.NewWriter(outFile)
 
 // 	// Add some files to the archive.
-// 	addFiles(w, baseFolder, "")
+// 	// addFiles(w, baseFolder, "")
 
 // 	if err != nil {
 // 		fmt.Println(err)
 // 	}
 
 // 	// Make sure to check the error on Close.
-// 	err = w.Close()
-// 	if err != nil {
-// 		fmt.Println(err)
-// 	}
 // }
+func CutSource(source string) string {
+	s := strings.ReplaceAll(source, "../SOURCE", "")
+	return s
+}
