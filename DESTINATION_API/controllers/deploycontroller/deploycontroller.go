@@ -151,10 +151,18 @@ func DeployFiles(c *gin.Context) {
 		case "media":
 			log.Printf("filesize = %d", len(fileBytes))
 			log.Println(part.Header.Get("Content-Filepath"))
+			ticket := part.Header.Get("Content-Ticket")
+			fmt.Println(ticket)
 			isAlreadyThere, _ := isExists(part.Header.Get("Content-Filepath"))
+
 			println(isAlreadyThere)
 			if isAlreadyThere {
 				backupList = append(backupList, filepath.ToSlash(part.Header.Get("Content-Filepath")))
+				data, err := ioutil.ReadFile(part.Header.Get("Content-Filepath"))
+				if err != nil {
+					fmt.Println(err)
+				}
+				takeBackup(filepath.ToSlash(part.Header.Get("Content-Filepath")), destination, ticket, data)
 			}
 			f, _ := os.Create(part.Header.Get("Content-Filepath"))
 			f.Write(fileBytes)
@@ -162,7 +170,21 @@ func DeployFiles(c *gin.Context) {
 		}
 	}
 	fmt.Println(backupList)
-	TakeBackup(backupList, destination)
+	// TakeBackup(backupList, destination)
+}
+func takeBackup(filename, destination, ticket string, fileBytes []byte) {
+	fmt.Println(filename)
+	source := CutSource(filename)
+	dir, file := filepath.Split(source)
+
+	currentTime := time.Now().Format("01-02-2006")
+	err := os.MkdirAll("../BACKUP/"+destination+"/"+currentTime+"/"+ticket+"/"+dir+"/", 0755)
+	if err != nil {
+		fmt.Println(err)
+	}
+	f, _ := os.Create("../BACKUP/" + destination + "/" + currentTime + "/" + ticket + "/" + dir + "/" + file)
+	f.Write(fileBytes)
+	f.Close()
 }
 func TakeBackup(backupList []string, destination string) {
 
